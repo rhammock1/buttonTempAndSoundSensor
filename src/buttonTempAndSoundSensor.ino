@@ -2,6 +2,8 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <TM1637Display.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
 #define tempData 25 // Pin for temperature sensor
 #define LED_PIN 27 // Pin for LED strip
@@ -10,12 +12,41 @@
 #define buttonPin 32 // Pin for state change button
 #define clkPin 26 // CLK pin on TM1637 display
 #define dioPin 14 // DIO pin on TM1637 display
+#define PATH "https://damp-bayou-68931.herokuapp.com/temperature" // Heroku endpoint for temperature data
+
+const char* ssid = "";
+const char* password = "";
+
+const char* root_ca = \
+"-----BEGIN CERTIFICATE-----\n" \
+"MIIDxTCCAq2gAwIBAgIQAqxcJmoLQJuPC3nyrkYldzANBgkqhkiG9w0BAQUFADBs\n" \
+"MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\n" \
+"d3cuZGlnaWNlcnQuY29tMSswKQYDVQQDEyJEaWdpQ2VydCBIaWdoIEFzc3VyYW5j\n" \
+"ZSBFViBSb290IENBMB4XDTA2MTExMDAwMDAwMFoXDTMxMTExMDAwMDAwMFowbDEL\n" \
+"MAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3\n" \
+"LmRpZ2ljZXJ0LmNvbTErMCkGA1UEAxMiRGlnaUNlcnQgSGlnaCBBc3N1cmFuY2Ug\n" \
+"RVYgUm9vdCBDQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMbM5XPm\n" \
+"+9S75S0tMqbf5YE/yc0lSbZxKsPVlDRnogocsF9ppkCxxLeyj9CYpKlBWTrT3JTW\n" \
+"PNt0OKRKzE0lgvdKpVMSOO7zSW1xkX5jtqumX8OkhPhPYlG++MXs2ziS4wblCJEM\n" \
+"xChBVfvLWokVfnHoNb9Ncgk9vjo4UFt3MRuNs8ckRZqnrG0AFFoEt7oT61EKmEFB\n" \
+"Ik5lYYeBQVCmeVyJ3hlKV9Uu5l0cUyx+mM0aBhakaHPQNAQTXKFx01p8VdteZOE3\n" \
+"hzBWBOURtCmAEvF5OYiiAhF8J2a3iLd48soKqDirCmTCv2ZdlYTBoSUeh10aUAsg\n" \
+"EsxBu24LUTi4S8sCAwEAAaNjMGEwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQF\n" \
+"MAMBAf8wHQYDVR0OBBYEFLE+w2kD+L9HAdSYJhoIAu9jZCvDMB8GA1UdIwQYMBaA\n" \
+"FLE+w2kD+L9HAdSYJhoIAu9jZCvDMA0GCSqGSIb3DQEBBQUAA4IBAQAcGgaX3Nec\n" \
+"nzyIZgYIVyHbIUf4KmeqvxgydkAQV8GK83rZEWWONfqe/EW1ntlMMUu4kehDLI6z\n" \
+"eM7b41N5cdblIZQB2lWHmiRk9opmzN6cN82oNLFpmyPInngiK3BD41VHMWEZ71jF\n" \
+"hS9OMPagMRYjyOfiZRYzy78aG6A9+MpeizGLYAiJLQwGXFK3xPkKmNEVX58Svnw2\n" \
+"Yzi9RKR/5CYrCsSXaQ3pjOLAEFe4yHYSkVXySGnYvCoCWw9E1CAx2/S6cCZdkGCe\n" \
+"vEsXCS+0yx5DaMkHJ8HSXPfqIbloEpw8nL+e/IBcm2PN7EeqJSdnoDfzAIJ9VNep\n" \
+"+OkuE6N36B9K\n" \
+"-----END CERTIFICATE-----\n";
 
 // Initialize variables
 int buttonPushCounter = 0;
 int lastButtonState = 0;
 long lastDebounceTime = 0;
-long debounceDelay = 100;
+long debounceDelay = 150;
 volatile int buttonState = 0;
 int brightness = 0;
 int fadeAmount = 2;
@@ -29,6 +60,7 @@ CRGB leds[NUM_LEDS];
 // Temperature sensor 
 OneWire oneWire(tempData);
 DallasTemperature sensors(&oneWire);
+// Display 
 TM1637Display display(clkPin, dioPin);
 
 // create degree fahrenheit symbol
@@ -37,12 +69,21 @@ const uint8_t fTemp[] = {
     SEG_A | SEG_F | SEG_G | SEG_E // F
 };
 
+HTTPClient http; // init http
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
   display.clear();
   display.setBrightness(75);
   
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected successfully boss");
+
   //  init button as input
   pinMode(buttonPin, INPUT);
   //  init temperature sensor
@@ -56,29 +97,47 @@ void setup() {
 }
 
 ICACHE_RAM_ATTR void pin_ISR() {
-    buttonState = digitalRead(buttonPin);
+  http.end();
 
-    if ( (millis() - lastDebounceTime) > debounceDelay) {
-      if (buttonState == 1) {
-        Serial.println("Button Pressed");
-        if (buttonPushCounter >= 2) {
-          buttonPushCounter = 0;
-        } else {
-          buttonPushCounter++;
-        }
-      
+  buttonState = digitalRead(buttonPin);
+
+  if ( (millis() - lastDebounceTime) > debounceDelay) {
+    if (buttonState == 1) {
+      Serial.println("Button Pressed");
+      if (buttonPushCounter >= 3) {
+        buttonPushCounter = 0;
+      } else {
+        buttonPushCounter++;
       }
     
-   }
-   lastDebounceTime = millis();
-   lastButtonState = buttonState;
+    }
+  
+  }
+  lastDebounceTime = millis();
+}
+
+void getHomeTemp() {
+  
+
+  http.begin(PATH, root_ca);
+  delay(50);
+  int httpCode = http.GET();
+  if (httpCode > 0) {
+    String payload = http.getString();
+    Serial.println(httpCode);
+    Serial.println(payload);
+  } else {
+    Serial.println("Error with request");
+  }
+
+  http.end();
 }
 
 void soundSensor() {
   
   int value = analogRead(soundPin);
   Serial.println(value);
-  int brightness = ((value * 100) / 255);
+  int brightness = ((value * 100) / 255); // Brightness will be a percentage of the total 
   if (value > 1000) {
     brightness = value / 40;
   }
@@ -244,6 +303,10 @@ void loop() {
       Serial.println("Random RGB");
       randomRGB();
       
+    } else if (buttonPushCounter == 3) {
+      delay(10);
+      Serial.println("Getting CLT Temperature");
+      getHomeTemp();
     } else {
       buttonPushCounter = 0;
       return;
