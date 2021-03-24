@@ -2,55 +2,25 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <TM1637Display.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
 
 #define tempData 25 // Pin for temperature sensor
 #define LED_PIN 27 // Pin for LED strip
 #define NUM_LEDS 10 // Number of LED on strip
-#define soundPin 33 // Analog input for the sound sensor
+#define soundPin 13 // Analog input for the sound sensor
 #define buttonPin 32 // Pin for state change button
 #define clkPin 26 // CLK pin on TM1637 display
 #define dioPin 14 // DIO pin on TM1637 display
-#define PATH "https://damp-bayou-68931.herokuapp.com/temperature" // Heroku endpoint for temperature data
-
-const char* ssid = "";
-const char* password = "";
-
-const char* root_ca = \
-"-----BEGIN CERTIFICATE-----\n" \
-"MIIDxTCCAq2gAwIBAgIQAqxcJmoLQJuPC3nyrkYldzANBgkqhkiG9w0BAQUFADBs\n" \
-"MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\n" \
-"d3cuZGlnaWNlcnQuY29tMSswKQYDVQQDEyJEaWdpQ2VydCBIaWdoIEFzc3VyYW5j\n" \
-"ZSBFViBSb290IENBMB4XDTA2MTExMDAwMDAwMFoXDTMxMTExMDAwMDAwMFowbDEL\n" \
-"MAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3\n" \
-"LmRpZ2ljZXJ0LmNvbTErMCkGA1UEAxMiRGlnaUNlcnQgSGlnaCBBc3N1cmFuY2Ug\n" \
-"RVYgUm9vdCBDQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMbM5XPm\n" \
-"+9S75S0tMqbf5YE/yc0lSbZxKsPVlDRnogocsF9ppkCxxLeyj9CYpKlBWTrT3JTW\n" \
-"PNt0OKRKzE0lgvdKpVMSOO7zSW1xkX5jtqumX8OkhPhPYlG++MXs2ziS4wblCJEM\n" \
-"xChBVfvLWokVfnHoNb9Ncgk9vjo4UFt3MRuNs8ckRZqnrG0AFFoEt7oT61EKmEFB\n" \
-"Ik5lYYeBQVCmeVyJ3hlKV9Uu5l0cUyx+mM0aBhakaHPQNAQTXKFx01p8VdteZOE3\n" \
-"hzBWBOURtCmAEvF5OYiiAhF8J2a3iLd48soKqDirCmTCv2ZdlYTBoSUeh10aUAsg\n" \
-"EsxBu24LUTi4S8sCAwEAAaNjMGEwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQF\n" \
-"MAMBAf8wHQYDVR0OBBYEFLE+w2kD+L9HAdSYJhoIAu9jZCvDMB8GA1UdIwQYMBaA\n" \
-"FLE+w2kD+L9HAdSYJhoIAu9jZCvDMA0GCSqGSIb3DQEBBQUAA4IBAQAcGgaX3Nec\n" \
-"nzyIZgYIVyHbIUf4KmeqvxgydkAQV8GK83rZEWWONfqe/EW1ntlMMUu4kehDLI6z\n" \
-"eM7b41N5cdblIZQB2lWHmiRk9opmzN6cN82oNLFpmyPInngiK3BD41VHMWEZ71jF\n" \
-"hS9OMPagMRYjyOfiZRYzy78aG6A9+MpeizGLYAiJLQwGXFK3xPkKmNEVX58Svnw2\n" \
-"Yzi9RKR/5CYrCsSXaQ3pjOLAEFe4yHYSkVXySGnYvCoCWw9E1CAx2/S6cCZdkGCe\n" \
-"vEsXCS+0yx5DaMkHJ8HSXPfqIbloEpw8nL+e/IBcm2PN7EeqJSdnoDfzAIJ9VNep\n" \
-"+OkuE6N36B9K\n" \
-"-----END CERTIFICATE-----\n";
 
 // Initialize variables
 int buttonPushCounter = 0;
-int lastButtonState = 0;
-int timeToStopCheckingWifi = 10000;
 long lastDebounceTime = 0;
 long debounceDelay = 150;
 volatile int buttonState = 0;
-int brightness = 0;
-int fadeAmount = 2;
+int brightness = 2;
+float sinCounter = 0;
+const int pwmIntervals = 35;
+float R = (pwmIntervals * log10(2))/(log10(255));
+bool down = false;
 int temp;
 int r;
 int g;
@@ -70,29 +40,11 @@ const uint8_t fTemp[] = {
     SEG_A | SEG_F | SEG_G | SEG_E // F
 };
 
-HTTPClient http; // init http
-
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
   display.clear();
   display.setBrightness(75);
-  
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    if (millis() > timeToStopCheckingWifi) {
-      Serial.println("Couldn't connect boss");
-      WiFi.disconnect();
-      break;
-    }
-    Serial.println(".");
-    delay(500);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("Connected successfully boss");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-  }
 
   //  init button as input
   pinMode(buttonPin, INPUT);
@@ -113,7 +65,7 @@ ICACHE_RAM_ATTR void pin_ISR() {
   if ( (millis() - lastDebounceTime) > debounceDelay) {
     if (buttonState == 1) {
       Serial.println("Button Pressed");
-      if (buttonPushCounter >= 3) {
+      if (buttonPushCounter >= 2) {
         buttonPushCounter = 0;
       } else {
         buttonPushCounter++;
@@ -123,24 +75,45 @@ ICACHE_RAM_ATTR void pin_ISR() {
   
   }
   lastDebounceTime = millis();
+
 }
 
-void getHomeTemp() {
+int handleBrightness() {
   
+//  brightness = (exp(sin(millis()/7000.0 * PI)) - 0.36787944)*108.0;
+  brightness = sin(sinCounter / 300.0 * PI) * 1000.0; // calculates sin wave 
+  brightness = map(brightness, -1000, 1000, 0, 100); // maps that value to be between 0 and 100
 
-  http.begin(PATH, root_ca);
-  delay(50);
-  int httpCode = http.GET();
-  if (httpCode > 0) {
-    String payload = http.getString();
-    Serial.println(httpCode);
-    Serial.println(payload);
+  if (!down) {
+    sinCounter = sinCounter + 20; // determines amplitude of the wave
   } else {
-    Serial.println("Error with request");
+    sinCounter = sinCounter - 20;
   }
+  if (brightness >= 100) {
+    down = true;
+    brightness = 100;
+  } else if (brightness <= 0) {
+    down = false;
+    brightness = 0;
+  }
+  
+  return brightness;
+}
+void sinRGB() {
+  
+  r = sin(sinCounter / 100)* 1000; // sin wave for each value spaced at different intervals with PI
+  g = sin(sinCounter /100 + PI*2/3) * 1000;
+  b = sin(sinCounter /100 + PI*4/3) * 1000;
+  r = map(r, -1000, 1000, 0, 255); // map each value between min and max values
+  g = map(g, -1000, 1000, 0, 255);
+  b = map(b, -1000, 1000, 0, 255);
 
-  http.end();
-  delay(10000);
+  fill_solid(leds, NUM_LEDS, CRGB(g, r, b));
+  
+  FastLED.show();
+  sinCounter = sinCounter + 10; // amplitude of the wave - using same variable as other 
+  delay(50);
+  
 }
 
 void soundSensor() {
@@ -156,20 +129,8 @@ void soundSensor() {
   
   fill_solid(leds, NUM_LEDS, CRGB::Blue);
   FastLED.show();
-  delay(175);
-
-}
-
-void randomRGB() {
   delay(100);
-  r = random(255);
-  g = random(255);
-  b = random(255);
 
-  fill_solid(leds, NUM_LEDS, CRGB(g, r, b));
-  FastLED.show();
-  delay(50);
-  
 }
 
 void tempSensor() {
@@ -276,15 +237,10 @@ void tempSensor() {
   }
 
   fill_solid(leds, NUM_LEDS, CRGB(g, r, b));
-  FastLED.setBrightness(brightness);
+  FastLED.setBrightness(handleBrightness());
   FastLED.show();
-  brightness = brightness + fadeAmount;
-  if (brightness <= 0 || brightness >= 100) {
-    fadeAmount = -fadeAmount;
-    
-  }
-
-  delay(10);
+  
+  delay(5);
 }
 
 void loop() {
@@ -295,7 +251,7 @@ void loop() {
     Serial.println(buttonPushCounter);
     
     if (buttonPushCounter == 0) {
-      delay(10);
+      delay(5);
       Serial.println("Temperature Sensor on");
       tempSensor();
       
@@ -310,18 +266,8 @@ void loop() {
     else if (buttonPushCounter == 2) {
       display.clear();
       delay(10);
-      Serial.println("Random RGB");
-      randomRGB();
-      
-    } else if (buttonPushCounter == 3) {
-      delay(10);
-      if (WiFi.status() != WL_CONNECTED) {
-        buttonPushCounter = 0;
-        return;
-      } else {
-        Serial.println("Getting CLT Temperature");
-        getHomeTemp();
-      }
+      Serial.println("Sin Wave RGB");
+      sinRGB();
       
     } else {
       buttonPushCounter = 0;
