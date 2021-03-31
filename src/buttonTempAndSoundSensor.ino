@@ -116,20 +116,23 @@ void sinRGB() {
   
 }
 
+// in the future for this func - setup to pulse on beat
 void soundSensor() {
+  int threshold = 150;
+  int soundValue = analogRead(soundPin); // I'm pretty sure the plotter plots this value when it's read
   
-  int value = analogRead(soundPin);
-  Serial.println(value);
-  int brightness = ((value * 100) / 255); // Brightness will be a percentage of the total 
-  if (value > 1000) {
-    brightness = value / 40;
+  if (soundValue < threshold) {
+    soundValue = threshold;
   }
-
-  FastLED.setBrightness(brightness);
   
-  fill_solid(leds, NUM_LEDS, CRGB::Blue);
+  int value = map(soundValue, 0, 3200, 22, 255); // soundValue is mapped to new range
+  
+  Serial.print("value:");
+  Serial.println(value);
+
+  fill_solid(leds, NUM_LEDS, CHSV(160, 255, value));
   FastLED.show();
-  delay(100);
+  delay(25);
 
 }
 
