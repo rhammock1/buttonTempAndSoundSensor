@@ -15,6 +15,8 @@
 int buttonPushCounter = 0;
 long lastDebounceTime = 0;
 long debounceDelay = 150;
+long lastTempCheck = 0;
+long tempCheckDelay = 10000;
 volatile int buttonState = 0;
 int brightness = 2;
 float sinCounter = 0;
@@ -42,7 +44,7 @@ const uint8_t fTemp[] = {
 
 void setup() {
   // put your setup code here, to run once:
-  Serial.begin(9600);
+  Serial.begin(115200);
   display.clear();
   display.setBrightness(75);
 
@@ -53,13 +55,14 @@ void setup() {
   //  init LED strip and clear it
   FastLED.addLeds<WS2812B, LED_PIN>(leds, NUM_LEDS).setCorrection(TypicalSMD5050);
   FastLED.clear();
+  
 //   Attach interrupt 
   attachInterrupt(digitalPinToInterrupt(buttonPin), pin_ISR, CHANGE);
   delay(500);
 }
 
 ICACHE_RAM_ATTR void pin_ISR() {
-
+  FastLED.setBrightness(75);
   buttonState = digitalRead(buttonPin);
 
   if ( (millis() - lastDebounceTime) > debounceDelay) {
@@ -75,19 +78,17 @@ ICACHE_RAM_ATTR void pin_ISR() {
   
   }
   lastDebounceTime = millis();
-
 }
 
 int handleBrightness() {
-  
-//  brightness = (exp(sin(millis()/7000.0 * PI)) - 0.36787944)*108.0;
+
   brightness = sin(sinCounter / 300.0 * PI) * 1000.0; // calculates sin wave 
   brightness = map(brightness, -1000, 1000, 0, 100); // maps that value to be between 0 and 100
 
   if (!down) {
-    sinCounter = sinCounter + 20; // determines amplitude of the wave
+    sinCounter = sinCounter + 10; // determines amplitude of the wave
   } else {
-    sinCounter = sinCounter - 20;
+    sinCounter = sinCounter - 10;
   }
   if (brightness >= 100) {
     down = true;
@@ -107,7 +108,7 @@ void sinRGB() {
   r = map(r, -1000, 1000, 0, 255); // map each value between min and max values
   g = map(g, -1000, 1000, 0, 255);
   b = map(b, -1000, 1000, 0, 255);
-
+  
   fill_solid(leds, NUM_LEDS, CRGB(g, r, b));
   
   FastLED.show();
@@ -119,33 +120,43 @@ void sinRGB() {
 // in the future for this func - setup to pulse on beat
 void soundSensor() {
   int threshold = 150;
-  int soundValue = analogRead(soundPin); // I'm pretty sure the plotter plots this value when it's read
+  int soundValue = analogRead(soundPin);
   
   if (soundValue < threshold) {
     soundValue = threshold;
   }
-  
-  int value = map(soundValue, 0, 3200, 22, 255); // soundValue is mapped to new range
+
+  int value = map(soundValue, 0, 3200, 25, 255); // soundValue is mapped to new range
   
   Serial.print("value:");
   Serial.println(value);
-
+  
   fill_solid(leds, NUM_LEDS, CHSV(160, 255, value));
   FastLED.show();
   delay(25);
 
 }
 
-void tempSensor() {
+void checkTemperature() {
   Serial.println("Checking the Temperature now:");
+  if (millis() <= 2500) {
+    sensors.requestTemperatures();
+    temp = sensors.getTempFByIndex(0);
+  } else if ((millis() - lastTempCheck) > tempCheckDelay) {
+     sensors.requestTemperatures();
+     temp = sensors.getTempFByIndex(0);
+     lastTempCheck = millis();
+  }
+  
+}
 
-  sensors.requestTemperatures();
-
-  Serial.print("Temperature: ");
-  temp = sensors.getTempFByIndex(0);
-  Serial.println(temp);
+void displayTemperature() {
   display.showNumberDec(temp, false, 2, 0);
   display.setSegments(fTemp, 2, 2);
+}
+
+void tempSensor() {
+
    if (temp >= 100) {
     r = 126;
     g = 0;
@@ -195,7 +206,6 @@ void tempSensor() {
     g = 247;
     b = 248;
   } else if (temp >= 40 && temp <= 44) {
-    
     r = 1;
     g = 204;
     b = 253;
@@ -233,7 +243,6 @@ void tempSensor() {
     g = 156;
     b = 195;
   } else {
-    
     r= 255;
     g = 255;
     b = 255;
@@ -243,7 +252,7 @@ void tempSensor() {
   FastLED.setBrightness(handleBrightness());
   FastLED.show();
   
-  delay(5);
+  delay(25);
 }
 
 void loop() {
@@ -255,20 +264,19 @@ void loop() {
     
     if (buttonPushCounter == 0) {
       delay(5);
+      checkTemperature();
       Serial.println("Temperature Sensor on");
       tempSensor();
       
     } 
     else if (buttonPushCounter == 1) {
-      display.clear();
       delay(10);
       Serial.println("Sound Sensor on");
       soundSensor();
       
     }
     else if (buttonPushCounter == 2) {
-      display.clear();
-      delay(10);
+      delay(5);
       Serial.println("Sin Wave RGB");
       sinRGB();
       
@@ -276,5 +284,5 @@ void loop() {
       buttonPushCounter = 0;
       return;
     }
-    
+    displayTemperature();
   }
